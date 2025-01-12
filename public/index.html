@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Prisoner's Dilemma - Game</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Prisoner's Dilemma</h1>
+  </header>
+
+  <!-- Rules Section -->
+  <section class="rules">
+    <h2>The Rules</h2>
+    <p>
+      You and one other person have been arrested and are interrogated separately.
+      You each have two choices:
+    </p>
+    <ul>
+      <li><strong>Stay Silent</strong></li>
+      <li><strong>Tattle</strong></li>
+    </ul>
+    <p>
+      The outcomes depend on both of your decisions:
+    </p>
+    <ul>
+      <li>If both remain silent, each serves 1 year.</li>
+      <li>If one tattles (and the other remains silent), the tattler goes free (0 years) and the silent one serves 3 years.</li>
+      <li>If both tattle, each serves 2 years.</li>
+    </ul>
+  </section>
+
+  <!-- Player Name -->
+  <section class="form-section">
+    <h2>Set Your Name</h2>
+    <form id="setNameForm">
+      <input type="text" id="playerName" placeholder="Enter your name" required />
+      <button type="submit">Save Name</button>
+    </form>
+  </section>
+
+  <!-- Create/Join Room -->
+  <section class="form-section">
+    <h2>Create a Room</h2>
+    <form id="createRoomForm">
+      <input type="text" id="createRoomId" placeholder="Room Name" required />
+      <button type="submit">Create Room</button>
+    </form>
+  </section>
+
+  <section class="form-section">
+    <h2>Join a Room</h2>
+    <form id="joinRoomForm">
+      <input type="text" id="joinRoomId" placeholder="Room Name" required />
+      <button type="submit">Join Room</button>
+    </form>
+  </section>
+
+  <!-- Notifications -->
+  <h2 class="log-header">Game Log</h2>
+  <div id="notificationsWrapper">
+    <div id="notifications"></div>
+  </div>
+  <!-- Game Controls -->
+  <section id="gameSection" style="display: none;">
+    <h2>Make Your Choice</h2>
+    <div class="button-group">
+      <button id="chooseSilent">Stay Silent</button>
+      <button id="chooseTattle">Tattle</button>
+      <button id="exitRoom">Exit</button>
+    </div>
+  </section>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let currentRoomId = null;
+    const notificationsWrapper = document.getElementById('notificationsWrapper');
+    const notifications = document.getElementById('notifications');
+    const gameSection = document.getElementById('gameSection');
+
+    // Track which room names have been shown
+    const shownRoomNames = {};
+
+    // Utility: append text to the notifications log & auto-scroll
+    function appendLog(messageHtml) {
+      notifications.innerHTML += messageHtml;
+      notificationsWrapper.scrollTop = notificationsWrapper.scrollHeight;
+    }
+
+    // Forms
+    const setNameForm = document.getElementById('setNameForm');
+    const createRoomForm = document.getElementById('createRoomForm');
+    const joinRoomForm = document.getElementById('joinRoomForm');
+
+    /* ---------------------
+       Socket Event Handlers
+       --------------------- */
+
+    socket.on('errorMessage', (msg) => {
+      appendLog(`<p style="color:red;">${msg}</p>`);
+    });
+
+    socket.on('roomCreated', ({ roomId }) => {
+      appendLog(`<p style="color:green;">Room "${roomId}" created successfully.</p>`);
+      currentRoomId = roomId;
+    });
+
+    socket.on('joinedRoom', ({ roomId, playerId }) => {
+      appendLog(`<p style="color:green;">Joined room "${roomId}" as socket: ${playerId}</p>`);
+      currentRoomId = roomId;
+      gameSection.style.display = 'block';
+    });
+
+    // Show room data
+    socket.on('roomData', (sanitizedRoom) => {
+      if (!sanitizedRoom) return;
+      const { roomId, players } = sanitizedRoom;
+
+      // Show room name only once
+      if (!shownRoomNames[roomId]) {
+        appendLog(`<p><strong>Current room:</strong> ${roomId}</p>`);
+        shownRoomNames[roomId] = true;
+      } else {
+        appendLog(`<p>A new player has joined!</p>`);
+      }
+
+      const playerList = players.map(p => `${p.name} (ID: ${p.id})`).join(', ');
+      appendLog(`<p><strong>Players:</strong> ${playerList}</p>`);
+    });
+
+    socket.on('choiceAnnouncement', (message) => {
+      appendLog(`<p>${message}</p>`);
+    });
+
+    // Each player only receives their own outcome
+    socket.on('showOutcome', (data) => {
+      // Data is { name, years, msg }
+      const { name, years, msg } = data;
+      appendLog(`
+        <p><strong>Outcome for ${name}:</strong> ${years} years<br>
+        <em>${msg}</em></p>
+      `);
+    });
+
+    socket.on('roomListUpdate', (rooms) => {
+      appendLog(`<p>Room list updated: ${Object.keys(rooms).join(', ')}</p>`);
+    });
+
+    /* ----------------
+       Form Submissions
+       ---------------- */
+
+    setNameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('playerName').value;
+      socket.emit('setName', { name });
+      appendLog(`<p style="color:blue;">Your name is set to "${name}".</p>`);
+    });
+
+    createRoomForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const roomId = document.getElementById('createRoomId').value;
+      socket.emit('createRoom', { roomId });
+    });
+
+    joinRoomForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const roomId = document.getElementById('joinRoomId').value;
+      socket.emit('joinRoom', { roomId });
+    });
+
+    // Player actions
+    document.getElementById('chooseSilent').addEventListener('click', () => {
+      if (!currentRoomId) return;
+      socket.emit('playerChoice', { roomId: currentRoomId, choice: 'silent' });
+    });
+
+    document.getElementById('chooseTattle').addEventListener('click', () => {
+      if (!currentRoomId) return;
+      socket.emit('playerChoice', { roomId: currentRoomId, choice: 'tattle' });
+    });
+
+    document.getElementById('exitRoom').addEventListener('click', () => {
+      if (!currentRoomId) return;
+      socket.emit('exitRoom', { roomId: currentRoomId });
+      currentRoomId = null;
+      gameSection.style.display = 'none';
+      appendLog('<p>You have exited the room.</p>');
+    });
+  </script>
+</body>
+</html>
+
+
